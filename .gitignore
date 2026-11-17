@@ -1,0 +1,7 @@
+/resources/
+/javafx-check/
+/cfr.jar
+/bytecode.txt
+/recovered/summary.txt
+*.exe
+*.class
