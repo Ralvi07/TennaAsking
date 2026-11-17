@@ -2,13 +2,14 @@
 #include <commctrl.h>
 #include <gdiplus.h>
 #include <mmsystem.h>
-#include <filesystem>
+#include <shlwapi.h>
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
 
 using namespace Gdiplus;
-namespace fs = std::filesystem;
+
 
 enum class Scene { Intro, Dodging, Accepted };
 constexpr int width = 500, height = 350;
@@ -17,16 +18,61 @@ constexpr UINT dodgeMessage = WM_APP + 1;
 HWND yesButton, noButton;
 HFONT buttonFont;
 Scene scene = Scene::Intro;
-fs::path mediaFolder;
+std::wstring audioPath;
+IStream* backgroundStream;
 std::unique_ptr<Image> background;
 std::vector<UINT> delays;
 UINT frame = 0;
 std::mt19937 randomEngine(std::random_device{}());
 
-void stopMusic() {
-    mciSendStringW(L"close valentineMusic", nullptr, 0, nullptr);
+struct MediaResource {
+    const BYTE* data;
+    DWORD size;
+};
+
+MediaResource loadResource(WORD id) {
+    HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
+    if (!resource) return {};
+    HGLOBAL bytes = LoadResource(nullptr, resource);
+    return {static_cast<const BYTE*>(LockResource(bytes)), SizeofResource(nullptr, resource)};
 }
 
+void stopMusic() {
+    mciSendStringW(L"close valentineMusic", nullptr, 0, nullptr);
+    if (!audioPath.empty()) {
+        DeleteFileW(audioPath.c_str());
+        audioPath.clear();
+    }
+}
+
+void playMusic(MediaResource song) {
+    if (!song.data || !song.size) return;
+    wchar_t directory[MAX_PATH];
+    const DWORD length = GetTempPathW(MAX_PATH, directory);
+    if (!length || length >= MAX_PATH) return;
+    const std::wstring path = std::wstring(directory) + L"TennaAsking-" +
+        std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(randomEngine()) + L".mp3";
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                              FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    const BOOL saved = WriteFile(file, song.data, song.size, &written, nullptr);
+    CloseHandle(file);
+    audioPath = path;
+    const auto command = L"open \"" + audioPath + L"\" type mpegvideo alias valentineMusic";
+    if (!saved || written != song.size ||
+        mciSendStringW(command.c_str(), nullptr, 0, nullptr) ||
+        mciSendStringW(L"play valentineMusic repeat", nullptr, 0, nullptr))
+        stopMusic();
+}
+
+void clearBackground() {
+    background.reset();
+    if (backgroundStream) {
+        backgroundStream->Release();
+        backgroundStream = nullptr;
+    }
+}
 void armFrame(HWND window) {
     if (delays.size() > 1)
         SetTimer(window, 1, delays[frame], nullptr);
@@ -36,17 +82,19 @@ void loadScene(HWND window, Scene next) {
     scene = next;
     KillTimer(window, 1);
     stopMusic();
-    static const wchar_t* pictures[] = {L"dr_tenna.gif", L"tennacrazy.gif", L"tennahappy.gif"};
-    static const wchar_t* songs[] = {L"miketheboard.mp3", L"doomboard.mp3", L"halloffame.mp3"};
+    static constexpr WORD pictures[] = {201, 202, 203};
+    static constexpr WORD songs[] = {211, 212, 213};
     const auto index = static_cast<unsigned>(next);
-    background.reset();
+    clearBackground();
     delays.clear();
     frame = 0;
-    const auto picture = mediaFolder / pictures[index];
-    if (fs::exists(picture)) {
-        background = std::make_unique<Image>(picture.c_str());
-        if (background->GetLastStatus() != Ok) {
-            background.reset();
+    const auto picture = loadResource(pictures[index]);
+    if (picture.data && picture.size)
+        backgroundStream = SHCreateMemStream(picture.data, picture.size);
+    if (backgroundStream) {
+        background.reset(Image::FromStream(backgroundStream));
+        if (!background || background->GetLastStatus() != Ok) {
+            clearBackground();
         } else {
             delays.assign(background->GetFrameCount(&FrameDimensionTime), 100);
             const auto size = background->GetPropertyItemSize(PropertyTagFrameDelay);
@@ -63,26 +111,19 @@ void loadScene(HWND window, Scene next) {
             armFrame(window);
         }
     }
-    const auto song = mediaFolder / songs[index];
-    if (fs::exists(song)) {
-        const auto command = L"open \"" + song.wstring() + L"\" type mpegvideo alias valentineMusic";
-        if (!mciSendStringW(command.c_str(), nullptr, 0, nullptr))
-            mciSendStringW(L"play valentineMusic repeat", nullptr, 0, nullptr);
-    }
+    playMusic(loadResource(songs[index]));
     InvalidateRect(window, nullptr, FALSE);
 }
 
 void paint(HWND window) {
     PAINTSTRUCT info{};
     HDC dc = BeginPaint(window, &info);
+    Bitmap buffer(width, height, PixelFormat32bppRGB);
     {
-        Graphics graphics(dc);
-        if (background) {
+        Graphics graphics(&buffer);
+        graphics.Clear(Color(0, 0, 0));
+        if (background)
             graphics.DrawImage(background.get(), 0, 0, width, height);
-        } else {
-            const Color colors[] = {Color(39, 20, 38), Color(66, 24, 57), Color(104, 35, 74)};
-            graphics.Clear(colors[static_cast<unsigned>(scene)]);
-        }
         FontFamily family(L"Segoe UI");
         Font title(&family, 24, FontStyleBold, UnitPixel);
         Font response(&family, 20, FontStyleRegular, UnitPixel);
@@ -90,12 +131,13 @@ void paint(HWND window) {
         centered.SetAlignment(StringAlignmentCenter);
         SolidBrush hotPink(Color(255, 105, 180));
         SolidBrush pink(Color(255, 192, 203));
-        graphics.DrawString(L"Will you be my Valentine? \U0001F498", -1, &title,
+        graphics.DrawString(L"Will you be my Valentine?", -1, &title,
                             RectF(0, 86, width, 36), &centered, &hotPink);
         if (scene == Scene::Accepted)
-            graphics.DrawString(L"YAY!!! \U0001F495\U0001F970 Happy Valentine\u2019s Day!", -1, &response,
+            graphics.DrawString(L"YAY!!! Happy Valentine's Day!", -1, &response,
                                 RectF(0, 220, width, 33), &centered, &pink);
     }
+    Graphics(dc).DrawImage(&buffer, 0, 0, width, height);
     EndPaint(window, &info);
 }
 
@@ -162,7 +204,7 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_DESTROY:
         KillTimer(window, 1);
         stopMusic();
-        background.reset();
+        clearBackground();
         PostQuitMessage(0);
         return 0;
     }
@@ -170,10 +212,7 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
-    wchar_t executable[32768];
-    const auto length = GetModuleFileNameW(nullptr, executable, 32768);
-    if (!length || length == 32768) return 1;
-    mediaFolder = fs::path(executable).parent_path() / L"resources";
+
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
     GdiplusStartupInput input;
@@ -192,7 +231,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
     RECT area{0, 0, width, height};
     AdjustWindowRect(&area, style, FALSE);
-    HWND window = CreateWindowW(cls.lpszClassName, L"\U0001F49D Valentine Question \U0001F49D", style,
+    HWND window = CreateWindowW(cls.lpszClassName, L"Valentine Question", style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, area.right - area.left, area.bottom - area.top,
                                 nullptr, nullptr, instance, nullptr);
     MSG message{};
