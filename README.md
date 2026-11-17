@@ -1,24 +1,24 @@
 # TennaAsking
 
-A small Windows Valentine app. The No button moves away when hovered. Choosing Yes displays the Valentine's Day message and disables both buttons.
+TennaAsking is a native C++ Valentine app for Windows. Hover over **NO** and it jumps away. Click **YES** to play the celebration animation and music and reveal the Valentine's Day message.
 
-## Build the native app
+## Run on Windows
 
-Extract the original media into the project folder with the JDK's `jar` command.
+Double-click `TennaAsking.exe` after building it. The standalone EXE includes all three animations and music tracks. You can copy it to another Windows 11 computer and run it without Java or a separate media folder.
 
-```powershell
-jar xf 'C:/Program Files/TennaAsking/app/Project_Test.jar' resources
-```
+## Build from source
 
-Then run these commands from the project folder in an MSYS2 UCRT64 shell with GCC and binutils installed.
+1. From the project folder, extract the media from the original installation using the JDK's `jar` command in PowerShell.
 
-```sh
-windres TennaAsking.rc -O coff -o TennaAsking.res.o
-g++ -std=c++17 -O2 -static -DUNICODE -D_UNICODE -municode -mwindows TennaAsking.cpp TennaAsking.res.o -o TennaAsking.exe -lgdiplus -lwinmm -lcomctl32 -lgdi32 -lshlwapi
-```
+   ```powershell
+   jar xf 'C:/Program Files/TennaAsking/app/Project_Test.jar' resources
+   ```
 
-The EXE embeds all six media files and runs on Windows 11 without Java or a separate media folder. Git excludes the original media and the built EXE.
+2. Open an MSYS2 UCRT64 shell with GCC and binutils installed. From the project folder, compile the resource file and build the EXE.
 
-## Recovered Java
+   ```sh
+   windres TennaAsking.rc -O coff -o TennaAsking.res.o
+   g++ -std=c++17 -O2 -static -DUNICODE -D_UNICODE -municode -mwindows TennaAsking.cpp TennaAsking.res.o -o TennaAsking.exe -lgdiplus -lwinmm -lcomctl32 -lgdi32 -lshlwapi
+   ```
 
-`recovered/ValentineApp.java` was decompiled with CFR 0.152 from the single application class in `Project_Test.jar`. The original comments, formatting, and some local names cannot be recovered from the bytecode. The Java version requires JavaFX controls and media and the original resources on its classpath.
+The original JavaFX app and its media are available in the separate [TennaAsking-Java repository](https://github.com/Ralvi07/TennaAsking-Java).
