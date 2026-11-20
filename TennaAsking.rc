@@ -1,3 +1,4 @@
+// Declares the Windows resources compiled into the TennaAsking executable.
 201 RCDATA "resources/dr_tenna.gif"
 202 RCDATA "resources/tennacrazy.gif"
 203 RCDATA "resources/tennahappy.gif"

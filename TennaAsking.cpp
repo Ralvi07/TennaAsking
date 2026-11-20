@@ -1,3 +1,4 @@
+// Runs the Win32 proposal scene, including media playback and the button-dodging interaction.
 #include <windows.h>
 #include <commctrl.h>
 #include <gdiplus.h>
@@ -11,6 +12,7 @@
 using namespace Gdiplus;
 
 
+// Track which stage of the interaction is active so input and rendering follow the same state.
 enum class Scene { Intro, Dodging, Accepted };
 constexpr int width = 500, height = 350;
 constexpr int yesId = 100, noId = 101;
@@ -25,6 +27,7 @@ std::vector<UINT> delays;
 UINT frame = 0;
 std::mt19937 randomEngine(std::random_device{}());
 
+// Group the embedded media resource details used by the application.
 struct MediaResource {
     const BYTE* data;
     DWORD size;
